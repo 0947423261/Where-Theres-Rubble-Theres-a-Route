@@ -8,55 +8,63 @@ The goal attracts the vehicle whilst obstacles repel the vehicle. At each step, 
 """
 
 import numpy as np
-from scipy.ndimage import distance_transform_edt
+from .base_planner import BasePlanner
+from .apf_mixin import APFMixin
 
 
-def _sample(field, x, y):
-    """Reads the distance value from a point in the 2D plane at the nearest cell to (x,y)"""
-    h, w = field.shape
-    # Round to the nearest integer coordinates from floating point and ensure the coordinates are not out-of-bounds
-    xi = min(max(int(round(x)), 0), w - 1)
-    yi = min(max(int(round(y)), 0), h - 1)
-    # Index the array to get the distance value
-    return field[yi, xi]
+class APF(BasePlanner, APFMixin):
+    # Initialise an object of the BasePlanner class to inherit from
+    def __init__(self, grid, start, goal, config):
+        super().__init__(grid, start, goal, config)
 
+    def _sample(field, x, y):
+        """Reads the distance value from a point in the 2D plane at the nearest cell to (x,y)"""
+        h, w = field.shape
+        # Round to the nearest integer coordinates from floating point and ensure the coordinates are not out-of-bounds
+        xi = min(max(int(round(x)), 0), w - 1)
+        yi = min(max(int(round(y)), 0), h - 1)
+        # Index the array to get the distance value
+        return field[yi, xi]
 
-def _apf_force(pos, goal, dist_field, grad_x, grad_x, config):
-    """
-    Computes the resultant vector acting on the vehicle.
-    """
-    # Converts the current position and goal position into numpy arrays in float type
-    pos = np.asarray(pos, dtype=float)
-    goal = np.asarray(goal, dtype=float)
+    def plan(self):
+        """
+        Run APF to compute an optimised path.
 
-    # TODO: complete this function
+        Returns a dictionary with the path (a list of [x,y] points along the route), whether it successfully reached the goal and the number of iterations/steps it took
+        """
+        dist_field, grad_x, grad_y = self._precompute_fields()
 
+        # Initial setup, current position is the start, goal is the goal. Converted to numpy array format as float type
+        pos = np.asarray(self.start, dtype=float)
+        goal = np.asarray(self.goal, dtype=float)
+        path = [pos.copy()]
 
-def _precompute_fields(grid):
-    """
-    Build the distance field and its gradient once, so every APF step is cheap.
-    Returns (dist_field, grad_x, grad_y).
-    """
-    # grid == 0 means that free space is set to True and obstacles are False. The Scipy function finds the euclidean distance from every False cell.
-    # Obstacles have 0 value and cells further away are "higher" and have large value
-    dist_field = distance_transform_edt(grid == 0)
-    # This calculates the slope at each cell telling you the direction the distance increases value increases the fastest. This is the direction of the repulsive force
-    grad_y, grad_x = np.gradient(dist_field)
-    return dist_field, grad_x, grad_y
+        # For each iteration we allow APF we check whether the goal has been reached within some tolerance.
+        for iter in range(self.config.apf_max_iter):
+            # Check if we reached goal
+            if self._arrived(pos):
+                return {"path": path, "success": True, "iters": iter}
 
+            # Work out the resultant force and direction
+            resultant_vector = self._apf_force(pos, goal, dist_field, grad_x, grad_y)
+            resultant_mag = np.linalg.norm(resultant_vector)
 
-def run_apf(grid, start, goal, config):
-    """
-    Run APF to compute an optimised path.
+            # if resultant force is negligible, we are stuck
+            if resultant_mag < 1e-9:
+                break
 
-    Returns a dictionary with the path (a list of [x,y] points along the route), whether it successfully reached the goal and the number of iterations/steps it took
-    """
-    dist_field, grad_x, grad_y = _precompute_fields(grid)
+            # Work out the normalised step direction from the resultant vector
+            step_dir = resultant_vector / resultant_mag
 
-    pos = np.asarray(start, dtype=float)
-    goal = np.asarray(goal, dtype=float)
+            # The new position is current position + step direction multiplied by the configured step distance
+            new_pos = pos + step_dir * self.config.apf_step
 
-    # TODO: consider shape
+            # change the position to the new position
+            pos = new_pos
+            # Append copy to the path so that the mutable reference isn't passed but a new copy is passed
+            path.append(pos.copy())
 
-    # If we exit the loop we never reached the goal.
-    return {"path": path, "success": False, "iters": config.apf_max_iter}
+        # TODO: consider shape
+
+        # If loop is exited it has failed to find the goal within configured iteration since the success condition returns within the loop
+        return {"path": path, "success": False, "iters": self.config.apf_max_iter}
