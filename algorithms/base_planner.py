@@ -22,7 +22,7 @@ class BasePlanner(ABC):
         """
         Run the planning algorithm and return a dictionary with the path from start to finish, whether the algorithm succeeded and the number of iterations.
         """
-        pass
+        raise NotImplementedError
 
     def _arrived(self, pos):
         # normalises the difference vector from current position to goal and checks if we are within tolerance

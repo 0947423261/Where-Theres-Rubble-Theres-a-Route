@@ -17,6 +17,7 @@ class APF(BasePlanner, APFMixin):
     def __init__(self, grid, start, goal, config):
         super().__init__(grid, start, goal, config)
 
+    @staticmethod
     def _sample(field, x, y):
         """Reads the distance value from a point in the 2D plane at the nearest cell to (x,y)"""
         h, w = field.shape
@@ -40,10 +41,10 @@ class APF(BasePlanner, APFMixin):
         path = [pos.copy()]
 
         # For each iteration we allow APF we check whether the goal has been reached within some tolerance.
-        for iter in range(self.config.apf_max_iter):
+        for iteration in range(self.config.apf_max_iter):
             # Check if we reached goal
             if self._arrived(pos):
-                return {"path": path, "success": True, "iters": iter}
+                return {"path": path, "success": True, "iters": iteration}
 
             # Work out the resultant force and direction
             resultant_vector = self._apf_force(pos, goal, dist_field, grad_x, grad_y)

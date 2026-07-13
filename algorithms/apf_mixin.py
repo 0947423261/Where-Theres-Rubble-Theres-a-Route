@@ -25,7 +25,7 @@ class APFMixin:
         grad_y, grad_x = np.gradient(dist_field)
         return dist_field, grad_x, grad_y
 
-    def _apf_force(pos, goal, dist_field, grad_x, grad_x, config):
+    def _apf_force(self, pos, goal, dist_field, grad_x, grad_y):
         """
         Computes the resultant vector acting on the vehicle.
         """
@@ -33,5 +33,37 @@ class APFMixin:
         pos = np.asarray(pos, dtype=float)
         goal = np.asarray(goal, dtype=float)
 
-        # TODO: complete this function
-        pass
+        # Calculate the attractive force proportional to how far the goal is. This follows Hook law style equation
+        attractive_force = self.config.apf_k_att * (goal - pos)
+
+        # Repulsive force from objects
+        dist_to_near_obj = self._sample(dist_field, pos[0], pos[1])
+
+        # Initialises the repulsive force vector
+        repulsive_force = np.zeros(2)
+
+        # Checks if the distance is within the configured threshold
+        if 0 < dist_to_near_obj < config.apf_rho0:
+            # Khatib FIRAS function
+            magnitude = (
+                config.apf_k_rep
+                * (1.0 / dist_to_near_obj - 1.0 / config.apf_rho0)
+                * (1.0 / (dist_to_near_obj**2))
+            )
+
+            # Gets the x component of the gradient
+            gx = self._sample(grad_x, pos[0], pos[1])
+            # Gets the y component of the gradient
+            gy = self._sample(grad_y, pos[0], pos[1])
+
+            # Constructs gradient vector
+            gradient_vector = np.array([gx, gy])
+
+            # Gets the magnitude of the gradient vector
+            gradient_magnitude = np.linalg.norm(gradient_vector)
+
+            if gradient_magnitude > 1e-9:
+                # Normalises the gradient vector and then multiplies by the magnitude calculated by Khatib (preserving repulsive force direction and using Khatib's exponential magnitude for APF)
+                repulsive_force = magnitude * (gradient_vector / gradient_magnitude)
+
+        return attractive_force + repulsive_force
