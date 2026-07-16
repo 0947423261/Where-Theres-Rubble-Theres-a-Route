@@ -1,5 +1,5 @@
 """
-alorithms/apf.py
+algorithms/apf.py
 
 Artificial Potential Field (APF) planner as proposed by Khatib, 1986
 
@@ -14,8 +14,8 @@ from .apf_mixin import APFMixin
 
 class APF(BasePlanner, APFMixin):
     # Initialise an object of the BasePlanner class to inherit from
-    def __init__(self, grid, start, goal, config):
-        super().__init__(grid, start, goal, config)
+    def __init__(self, grid, start, goal, config, rng):
+        super().__init__(grid, start, goal, config, rng)
 
     @staticmethod
     def _sample(field, x, y):
@@ -44,7 +44,12 @@ class APF(BasePlanner, APFMixin):
         for iteration in range(self.config.apf_max_iter):
             # Check if we reached goal
             if self._arrived(pos):
-                return {"path": path, "success": True, "iters": iteration}
+                return {
+                    "path": path,
+                    "success": True,
+                    "iters": iteration,
+                    "switches": 0,
+                }
 
             # Work out the resultant force and direction
             resultant_vector = self._apf_force(pos, goal, dist_field, grad_x, grad_y)
@@ -68,4 +73,9 @@ class APF(BasePlanner, APFMixin):
         # TODO: consider shape
 
         # If loop is exited it has failed to find the goal within configured iteration since the success condition returns within the loop
-        return {"path": path, "success": False, "iters": self.config.apf_max_iter}
+        return {
+            "path": path,
+            "success": False,
+            "iters": self.config.apf_max_iter,
+            "switches": 0,
+        }

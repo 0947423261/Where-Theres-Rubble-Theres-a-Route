@@ -11,11 +11,12 @@ import numpy as np
 
 class BasePlanner(ABC):
     # Constructor consisting of the grid, start, goal and configuration
-    def __init__(self, grid, start, goal, config):
+    def __init__(self, grid, start, goal, config, rng):
         self.grid = grid
         self.start = np.asarray(start, dtype=float)
         self.goal = np.asarray(goal, dtype=float)
         self.config = config
+        self.rng = rng
 
     @abstractmethod
     def plan(self):
