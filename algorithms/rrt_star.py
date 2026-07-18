@@ -33,8 +33,8 @@ class _Node:
 
 
 class RRTStar(BasePlanner):
-    def __init__(self, grid, start, goal, config):
-        super().__init__(grid, start, goal, config)
+    def __init__(self, grid, start, goal, config, rng):
+        super().__init__(grid, start, goal, config, rng)
 
     @staticmethod
     def _nearest(nodes, point):
@@ -54,6 +54,11 @@ class RRTStar(BasePlanner):
                 # Saves the new distance and node
                 best_distance = distance
                 best = node
+
+        # Ensure best is well typed
+        if best is None:
+            exit()
+
         return best
 
     @staticmethod
@@ -75,7 +80,7 @@ class RRTStar(BasePlanner):
         return start + (direction / distance) * step
 
     @staticmethod
-    def _near_nodes(nodes, point, radius):
+    def _neighbours(nodes, point, radius):
         """Return all tree nodes (neighbours) within 'radius' of 'point'"""
         neighbours = []
 
@@ -102,63 +107,89 @@ class RRTStar(BasePlanner):
         'switches': 0 (RRT* has no mode switching)
         """
         # Gets the shape of the grid
-        h, w = grid.shape
+        h, w = self.grid.shape
 
         # Unlike APF doesn't need to know position since it is done statically and not in run-time (while vehicle is moving)
-        start = np.asarray(start, dtype=float)
-        goal = np.asarray(goal, dtype=float)
+        # Converts the start and goal to numpy array format as float type
+        start = np.asarray(self.start, dtype=float)
+        goal = np.asarray(self.goal, dtype=float)
 
+        ### === Initialisation === ###
+        # Creates the root node at the start with 0 cost
         root = _Node(start, parent=None, cost=0.0)
+        # Adds root node to list of node
         nodes = [root]
+        # Sets goal node as none
         goal_node = None
+        ### === END ===
 
-        for it in range(cfg.rrt_max_iter):
-            # --- Step 1: pick a random sample (sometimesmaps     aim at the goal). ---
-            if rng.random() < cfg.rrt_goal_bias:
+        # Iterates up until we reach the maximum configured number of iterations for RRT
+        for iteration in range(self.config.rrt_max_iter):
+            # Generates a random floating point between 0 and 1  if it is less than the goal bias (percentage of times we select the goal), then the point is the goal
+            if self.rng.random() < self.config.rrt_goal_bias:
                 sample = goal.copy()
             else:
-                sample = np.array([rng.uniform(0, w - 1), rng.uniform(0, h - 1)])
+                # Otherwise the point is a random point within the boundary of the map
+                sample = np.array(
+                    [self.rng.uniform(0, w - 1), self.rng.uniform(0, h - 1)]
+                )
 
-            # --- Step 2 & 3: nearest node, then steer toward the sample. ---
-            nearest = _nearest(nodes, sample)
-            new_pos = _steer(nearest.pos, sample, cfg.rrt_step)
+            # Finds nearest node to the sample point
+            nearest = self._nearest(nodes, sample)
 
-            # Skip if the new point itself is on an obstacle.
-            if point_blocked(grid, new_pos[0], new_pos[1]):
-                continue
-            # Skip if the branch to it is blocked.
-            if segment_blocked(grid, nearest.pos, new_pos):
-                continue
+            # Finds the point along the line from sample to nearest node to add the new node
+            new_pos = self._steer(nearest.pos, sample, self.config.rrt_step)
 
-            # --- Step 5a: choose the CHEAPEST parent among nearby nodes. ---
-            neighbours = _near_nodes(nodes, new_pos, cfg.rrt_radius)
+            # Finds the neighbours
+            neighbours = self._neighbours(nodes, new_pos, self.config.rrt_radius)
+
+            # === Finding the Best Parent ===
+            # RRT* doesn't use the nearest node as the parent but rather the node that is within the radius with smallest cost to start
+            # Initialise with best parent being the nearest node
             best_parent = nearest
+            # The initial cost is the cost to the nearest node + the distance from the parent to the new node
             best_cost = nearest.cost + np.linalg.norm(new_pos - nearest.pos)
-            for nb in neighbours:
-                if segment_blocked(grid, nb.pos, new_pos):
-                    continue
-                c = nb.cost + np.linalg.norm(new_pos - nb.pos)
-                if c < best_cost:
-                    best_cost = c
-                    best_parent = nb
 
+            for neighbour in neighbours:
+                # If the path between the neighbour and the node is blocked by an obstacle we can't make that neighbour the parent and connect to it
+                if self._segment_blocked(neighbour.pos, new_pos):
+                    continue
+
+                # Finds the cost if we use the neighbour as the parent
+                cost = neighbour.cost + np.linalg.norm(new_pos - neighbour.pos)
+                # If the cost beats the current best we will use this neighbour as the parent for now (set it as best)
+                if cost < best_cost:
+                    best_cost = cost
+                    best_parent = neighbour
+
+            # Creates a new node at the new node position, with cost set as the cost using whatever was determined to be the parent
             new_node = _Node(new_pos, parent=best_parent, cost=best_cost)
+            # Add the node to list of nodes
             nodes.append(new_node)
+            ### === END ===
 
-            # --- Step 5b: re-wire neighbours to go THROUGH the new node if cheaper.
-            for nb in neighbours:
-                if nb is best_parent:
+            ### === Rewiring ===
+            for neighbour in neighbours:
+                # If the neighbour is the parent we can't rewire the parent to use this node as its parent (loop)
+                if neighbour is best_parent:
                     continue
-                if segment_blocked(grid, new_node.pos, nb.pos):
+                # If the path between the new node and the neighbour is blocked by an obstacle we can't rewire the neighbour to use this node
+                if self._segment_blocked(new_node.pos, neighbour.pos):
                     continue
-                new_cost = new_node.cost + np.linalg.norm(nb.pos - new_node.pos)
-                if new_cost < nb.cost:
-                    nb.parent = new_node
-                    nb.cost = new_cost
+                # Sees what the cost would be for the neighbour to potentially rewire would be if it used this node as a connection instead
+                new_cost = new_node.cost + np.linalg.norm(neighbour.pos - new_node.pos)
 
-            # --- Step 6: did we get close enough to the goal? ---
-            if np.linalg.norm(new_node.pos - goal) <= cfg.rrt_goal_thresh:
-                if not segment_blocked(grid, new_node.pos, goal):
+                # If the new cost beats the current cost for the neighbour we rewire the neighbour to use this node and have its new cost
+                if new_cost < neighbour.cost:
+                    neighbour.parent = new_node
+                    neighbour.cost = new_cost
+            ### === END ===
+
+            vector_to_goal = new_node.pos - goal
+            # Checks if the distance to the goal is less than the configured threshold distance for reaching the goal
+            if np.linalg.norm(vector_to_goal) <= self.config.rrt_goal_thresh:
+                # If there is no obstacle between the node and the goal, we set the parent of the goal node to be the new node and the cost as the new node cost + distance to the goal node
+                if not self._segment_blocked(new_node.pos, goal):
                     goal_node = _Node(
                         goal,
                         parent=new_node,
@@ -166,21 +197,25 @@ class RRTStar(BasePlanner):
                     )
                     break
 
-        # If we never reached the goal, report failure.
+        # If goal node is not reached report failure
         if goal_node is None:
             return {
                 "path": None,
                 "success": False,
-                "iters": cfg.rrt_max_iter,maps    
+                "iters": self.config.rrt_max_iter,
                 "switches": 0,
             }
 
-        # Trace the chain of parents from the goal back to the start, then reverse.
+        # Traceback the path from the goal node
         path = []
         node = goal_node
         while node is not None:
+            # Add each node position to the path
             path.append(list(node.pos))
+            # Traverse to the parent node
             node = node.parent
+
+        # Reverse the path to go from start to goal
         path.reverse()
 
-        return {"path": path, "success": True, "iters": it, "switches": 0}
+        return {"path": path, "success": True, "iters": iteration, "switches": 0}

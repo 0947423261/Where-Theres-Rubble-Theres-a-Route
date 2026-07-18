@@ -7,6 +7,7 @@ Abstract class containing methods to be implemented by the path planning algorit
 
 from abc import ABC, abstractmethod
 import numpy as np
+from ..utils.collision import point_blocked, segment_blocked, path_blocked
 
 
 class BasePlanner(ABC):
@@ -28,3 +29,23 @@ class BasePlanner(ABC):
     def _arrived(self, pos):
         # normalises the difference vector from current position to goal and checks if we are within tolerance
         return np.linalg.norm(pos - self.goal) <= self.config.goal_tolerance
+
+    def _point_blocked(self, pos):
+        return point_blocked(self.grid, pos[0], pos[1])
+
+    def _segment_blocked(self, a, b):
+        return segment_blocked(self.grid, a, b)
+
+    def _validate_path(self, path):
+        """Check that all points along a path are free and all segments are collision‑free."""
+        # If the path is empty return false
+        if not path:
+            return False
+        # For every point in the path check if it is blocked
+        for p in path:
+            if self._point_blocked(p):
+                return False
+        # Check if any part of the path goes through an obstacle
+        if path_blocked(self.grid, path):
+            return False
+        return True
