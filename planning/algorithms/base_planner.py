@@ -42,8 +42,8 @@ class BasePlanner(ABC):
         if not path:
             return False
         # For every point in the path check if it is blocked
-        for p in path:
-            if self._point_blocked(p):
+        for point in path:
+            if self._point_blocked(point):
                 return False
         # Check if any part of the path goes through an obstacle
         if path_blocked(self.grid, path):

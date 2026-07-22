@@ -45,7 +45,7 @@ class APFMixin:
         # Creates lists for the distance field and gradients for each obstacle
         dist_list, gx_list, gy_list = [], [], []
 
-        # Iterates through obstacles
+        # Iterates through obstacles and make 3d cube where each slice is 2d array of distance, x component of gradient or y component of gradient
         for obstacle_id in range(1, num_obstacles + 1):
             # Create a boolean mask where it's true for cells that belong to this obstacle and false for anything else
             this_obstacle = labels == obstacle_id
@@ -63,7 +63,7 @@ class APFMixin:
         return (np.stack(dist_list), np.stack(gx_list), np.stack(gy_list))
 
     def _sample_stack(self, stack, x, y):
-        """
+        """r
         Read a value per obstacle from the stack at position (x, y).
         Returns an array of these values for each obstacle
         """

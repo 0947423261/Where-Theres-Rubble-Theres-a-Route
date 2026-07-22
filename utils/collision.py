@@ -1,58 +1,61 @@
 """
 utilities/collision.py
-===============
-File containing code to find all types of collisions and boundary checks
+==================
 
-The map is stored in a 2D array where cells with 0 mean the cell is free otherwise the cell has an obstacle (rubble or building). The difference in value for rubble and buildings is for animations.
 
-For reference positions are written [x, y]  but the array is indexed grid[y, x]
+Contains helper functions for boundary and collision checks
+
+The map is stored as a 2D grid where every non-zero cell is an obstacle, the value (if non-zero) is used for graphs
 """
 
 import numpy as np
 
 
 def in_bounds(grid, x, y):
-    """Return True if (x, y) is inside the grid."""
+    """Return True if (x, y) is inside bounds"""
+    # Gets the bounds
     h, w = grid.shape
     return 0 <= x < w and 0 <= y < h
 
 
 def point_blocked(grid, x, y):
     """
-    Return True if the point is off the edge of the map or is an obstacle. The position is rounded to nearest integer since the grid uses integer indexes.
+    Return True if the point (x,y) is either an obstacle or out of bounds
     """
-    xi = int(round(x))
-    yi = int(round(y))
+    # Rounded to integer since the map array is indexed with integers
+    x = int(round(x))
+    y = int(round(y))
 
-    # If not in bounds it is blocked
-    if not in_bounds(grid, xi, yi):
+    # If the point is out of bounds we mark it as blocked
+    if not in_bounds(grid, x, y):
         return True
-    # Return True if there is obstacle otherwise False
-    return grid[yi, xi] != 0
+    # If the point is in bounds and non-zero it is an obstacle
+    return grid[y, x] != 0
 
 
-def segment_blocked(grid, point_0, point_1, spacing=0.5):
+def segment_blocked(grid, point0, point1, spacing=0.5):
     """
-    Return True if the straight line from point point_0 to point point_1 passes through
-    ANY obstacle.
+    If the straight line between point 0 and point 1 passes through an obstacle or out of bounds it is considered blocked
 
-    Since it is not feasible to check infinitely across the line, step along and check each sample point.
+    Since the line can't be checked infinitely along its points, it is sampled every configured spacing distance and stepped through in increments to sample each point and then check that point.
     """
 
-    # Convert both points to numpy arrays of type float
-    p0 = np.asarray(point_0, dtype=float)
-    p1 = np.asarray(point_1, dtype=float)
+    # Convert the points to numpy arrays of type float
+    point0 = np.asarray(point0, dtype=float)
+    point1 = np.asarray(point1, dtype=float)
 
-    # Find the magnitude of the line between both points
-    dist = np.linalg.norm(p1 - p0)
-    # Find the number of samples (at minimum 2)
-    n_samples = max(2, int(dist / spacing))
+    # Length of segment connecting points
+    segment_length = np.linalg.norm(point1 - point0)
 
-    # Splits 1 into n_samples fractions
-    for t in np.linspace(0.0, 1.0, n_samples):
-        # Finds the point that is the sample's corresponding fraction across the line
-        point = p0 + t * (p1 - p0)
-        # Checks if the sample is blocked
+    # Finds the number of samples along the segment, at least two points (start and end point)
+    n_samples = max(2, int(segment_length / spacing))
+
+    # Finds evenly-spaced fractions between 0 and 1. The number of fractions is the number of samples, so at each fraction we take a sample
+    for fraction in np.linspace(0.0, 1.0, n_samples):
+        # Find the sample point by going fraction across the segment
+        point = point0 + fraction * (point1 - point0)
+
+        # If the point is blocked then the segment is blocked at that point
         if point_blocked(grid, point[0], point[1]):
             return True
     return False
@@ -60,10 +63,11 @@ def segment_blocked(grid, point_0, point_1, spacing=0.5):
 
 def path_blocked(grid, path):
     """
-    Return True if ANY segment of a whole path collides with an obstacle.
+    Checks if any segment of the path goes out of bounds or through an obstacle by checking the segment between consecutive points in the path.
     """
-    # For every point in the path check that the point and the consecutive point are not blocked by an obstacle
+    # For each point in the path
     for i in range(len(path) - 1):
+        # Check if the segment between the point and next consecutive point is blocked (path from one point to another), prove the path is valid using inductive analysis
         if segment_blocked(grid, path[i], path[i + 1]):
             return True
     return False

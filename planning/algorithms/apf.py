@@ -10,7 +10,6 @@ The goal attracts the vehicle whilst obstacles repel the vehicle. At each step, 
 import numpy as np
 from .base_planner import BasePlanner
 from .apf_mixin import APFMixin
-from ..utils.collision import point_blocked
 
 
 class APF(BasePlanner, APFMixin):
@@ -67,7 +66,7 @@ class APF(BasePlanner, APFMixin):
             new_pos = pos + step_dir * self.config.apf_step
 
             # If the step drives into an obstacle treat it as blocked and stop APF since there is no recovery mode
-            if point_blocked(self.grid, new_pos[0], new_pos[1]):
+            if self._point_blocked(new_pos):
                 break
 
             # change the position to the new position

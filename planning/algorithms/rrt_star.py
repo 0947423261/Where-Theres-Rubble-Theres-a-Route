@@ -140,6 +140,12 @@ class RRTStar(BasePlanner):
             # Finds the point along the line from sample to nearest node to add the new node
             new_pos = self._steer(nearest.pos, sample, self.config.rrt_step)
 
+            # If the branch from the nearest node to the new node passes through an obstacle or leaves the map, the new node can't be added. The sampled check covers the new node itself since the endpoints are sampled too. Without this the tree grows through buildings and the traced path is not driveable
+
+            # This is because nearest node may very well be the parent when we do finding best parent initialisation
+            if self._segment_blocked(nearest.pos, new_pos):
+                continue
+
             # Finds the neighbours
             neighbours = self._neighbours(nodes, new_pos, self.config.rrt_radius)
 
