@@ -1,0 +1,11 @@
+# Install everything at once with:  pip install -r requirements.txt
+#
+# The versions are the lowest known to work. Newer ones are fine.
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+pandas>=2.0
+
+# Pillow writes the GIF animations. It arrives with matplotlib, and is listed
+# because the animation module imports it through matplotlib rather than by name.
+pillow>=9.0
