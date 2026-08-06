@@ -1,7 +1,6 @@
 """
 algorithms/base_planner.py
 
-==============
 Abstract class containing methods to be implemented by the path planning algorithms to allow for modular design and easy extendability with less boilerplate
 """
 

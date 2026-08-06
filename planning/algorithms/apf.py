@@ -3,7 +3,6 @@ algorithms/apf.py
 
 Artificial Potential Field (APF) planner as proposed by Khatib, 1986
 
-===============
 The goal attracts the vehicle whilst obstacles repel the vehicle. At each step, the resultant force is calculated and a small step is taken in that direction. This is repeated until the goal is reached or a livelock state.
 """
 
@@ -65,8 +64,8 @@ class APF(BasePlanner, APFMixin):
             # The new position is current position + step direction multiplied by the configured step distance
             new_pos = pos + step_dir * self.config.apf_step
 
-            # If the step drives into an obstacle treat it as blocked and stop APF since there is no recovery mode
-            if self._point_blocked(new_pos):
+            # If the step drives into an obstacle treat it as blocked and stop APF since there is no recovery mode. The whole segment is checked, not only the cell the step lands on, so a step cannot cut through the corner of an obstacle the way the scorer would catch
+            if self._segment_blocked(pos, new_pos):
                 break
 
             # change the position to the new position

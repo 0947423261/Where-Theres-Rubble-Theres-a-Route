@@ -1,7 +1,6 @@
 """
 algorithms/apf_mixin.py
 
-==========
 This mixin class contains functionality used by both hybrid and standard apf algorithms
 """
 
