@@ -3,7 +3,6 @@ algorithms/rrt_star.py
 
 Rapidly-exploring Random Tree star version (RRT*) as proposed by LaValle 1998; Karaman & Frazzoli 2011
 
-==================
 1. Picks random points and finds the tree node nearest.
 2. Takes a small step from the tree node to the random point, if there is no collision, it adds the new node to the tree.
 3. The star variant looks at nearby neighbour nodes and re-wires their connections to this node or this node to a node that gives the shortest path to this node.
@@ -33,8 +32,11 @@ class _Node:
 
 
 class RRTStar(BasePlanner):
-    def __init__(self, grid, start, goal, config, rng):
+    def __init__(self, grid, start, goal, config, rng, trace=False):
         super().__init__(grid, start, goal, config, rng)
+
+        # Whether to record how the tree grew, for the animation. Off in the experiment so nothing extra is done inside the timed run. Recording touches no random draw and no arithmetic, so the route is the same either way
+        self.trace = trace
 
     @staticmethod
     def _nearest(nodes, point):
@@ -55,9 +57,9 @@ class RRTStar(BasePlanner):
                 best_distance = distance
                 best = node
 
-        # Ensure best is well typed
+        # The tree always holds at least the root, so this cannot happen. If it ever does, fail loudly rather than silently killing the process
         if best is None:
-            exit()
+            raise ValueError("RRT* asked for the nearest node of an empty tree")
 
         return best
 
@@ -105,6 +107,7 @@ class RRTStar(BasePlanner):
         'success' : True/False
         'iters'   : how many samples it used
         'switches': 0 (RRT* has no mode switching)
+        'trace'   : only when tracing, the tree's history as a list of events: ("add", node, parent) when a node joins, ("rewire", node, old parent, new parent) when a neighbour changes parent, ("goal", goal, parent) when the goal connects. Positions are (x, y) tuples
         """
         # Gets the shape of the grid
         h, w = self.grid.shape
@@ -121,6 +124,9 @@ class RRTStar(BasePlanner):
         nodes = [root]
         # Sets goal node as none
         goal_node = None
+
+        # The tree's history, only kept when tracing
+        events = []
         ### === END ===
 
         # Iterates up until we reach the maximum configured number of iterations for RRT
@@ -141,8 +147,6 @@ class RRTStar(BasePlanner):
             new_pos = self._steer(nearest.pos, sample, self.config.rrt_step)
 
             # If the branch from the nearest node to the new node passes through an obstacle or leaves the map, the new node can't be added. The sampled check covers the new node itself since the endpoints are sampled too. Without this the tree grows through buildings and the traced path is not driveable
-
-            # This is because nearest node may very well be the parent when we do finding best parent initialisation
             if self._segment_blocked(nearest.pos, new_pos):
                 continue
 
@@ -172,6 +176,9 @@ class RRTStar(BasePlanner):
             new_node = _Node(new_pos, parent=best_parent, cost=best_cost)
             # Add the node to list of nodes
             nodes.append(new_node)
+
+            if self.trace:
+                events.append(("add", tuple(new_node.pos), tuple(best_parent.pos)))
             ### === END ===
 
             ### === Rewiring ===
@@ -187,6 +194,8 @@ class RRTStar(BasePlanner):
 
                 # If the new cost beats the current cost for the neighbour we rewire the neighbour to use this node and have its new cost
                 if new_cost < neighbour.cost:
+                    if self.trace:
+                        events.append(("rewire", tuple(neighbour.pos), tuple(neighbour.parent.pos), tuple(new_node.pos)))
                     neighbour.parent = new_node
                     neighbour.cost = new_cost
             ### === END ===
@@ -201,16 +210,21 @@ class RRTStar(BasePlanner):
                         parent=new_node,
                         cost=new_node.cost + np.linalg.norm(goal - new_node.pos),
                     )
+                    if self.trace:
+                        events.append(("goal", tuple(goal), tuple(new_node.pos)))
                     break
 
         # If goal node is not reached report failure
         if goal_node is None:
-            return {
+            result = {
                 "path": None,
                 "success": False,
                 "iters": self.config.rrt_max_iter,
                 "switches": 0,
             }
+            if self.trace:
+                result["trace"] = events
+            return result
 
         # Traceback the path from the goal node
         path = []
@@ -224,4 +238,7 @@ class RRTStar(BasePlanner):
         # Reverse the path to go from start to goal
         path.reverse()
 
-        return {"path": path, "success": True, "iters": iteration, "switches": 0}
+        result = {"path": path, "success": True, "iters": iteration, "switches": 0}
+        if self.trace:
+            result["trace"] = events
+        return result
