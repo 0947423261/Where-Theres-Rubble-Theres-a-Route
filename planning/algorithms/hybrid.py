@@ -3,7 +3,6 @@ algorithms/hybrid.py
 
 Hybrid APF + RRT* planner containing extensions
 
-==================
 The hybrid lets APF drive the vehicle normally and only invokes RRT* to escape APF local minima where it is stuck before reverting back to APF.
 
 Two constructor parameters select between the four modes used in the ablation study:
@@ -26,12 +25,15 @@ from .smoothers import NoSmoother
 
 class Hybrid(BasePlanner, APFMixin):
     # Initialise an object of the BasePlanner class to inherit from with the two mentioned parameters that enable/disable adaptive stuck-detection and smoothing
-    def __init__(self, grid, start, goal, config, rng, adaptive=False, smoother=None):
+    def __init__(self, grid, start, goal, config, rng, adaptive=False, smoother=None, trace=False):
         super().__init__(grid, start, goal, config, rng)
 
         # Set the flags for adaptive stuck-detection and smoothing
         self.adaptive = adaptive
         self.smoother = smoother if smoother is not None else NoSmoother(config)
+
+        # Whether the escapes record how their trees grew, for the animation. Off in the experiment, and recording touches no random draw so the route is the same either way
+        self.trace = trace
 
     def _local_density(self, x, y, radius):
         """
@@ -137,6 +139,8 @@ class Hybrid(BasePlanner, APFMixin):
     def _pick_subgoal(self, pos):
         """
         Choose the point the RRT* escape should use as a goal, it is placed a fixed distance along a straight line from the current position and the global goal. This ensures progress instead of just local minima escape. If the goal is within a certain distance from the vehicle, we simply use the goal.
+
+        A sub-goal that sits inside a pocket hands the vehicle straight back to the trap, so before a sub-goal is accepted the straight line from it towards the goal is checked for one more sub-goal distance. If that line is blocked the distance is doubled and the sub-goal is picked again, up to the configured number of doublings.
         """
         # Converts the current position to numpy array format as float type
         pos = np.asarray(pos, dtype=float)
@@ -147,15 +151,32 @@ class Hybrid(BasePlanner, APFMixin):
         # Magnitude (Euclidean distance) of that vector
         distance = np.linalg.norm(direction)
 
-        # If the goal is nearer than the configured sub-goal distance, aim at it
-        if distance <= self.config.subgoal_dist:
-            return self._find_free_cell(self.goal)
+        # How far along the line the sub-goal is placed, starting at the configured distance and doubling each time the line ahead is blocked
+        reach = self.config.subgoal_dist
 
-        # Otherwise step the configured distance along the normalised direction after normalising the direction vector to a unit vector
-        target = pos + (direction / distance) * self.config.subgoal_dist
+        for _ in range(self.config.subgoal_max_doublings + 1):
+            # If the goal is nearer than the current sub-goal distance, aim at it
+            if distance <= reach:
+                return self._find_free_cell(self.goal)
 
-        # Snap the target onto a free cell so RRT* has a reachable goal and isn't aiming for an obstacle or out of bounds
-        return self._find_free_cell(target)
+            # Otherwise step the distance along the normalised direction and snap the target onto a free cell so RRT* has a reachable goal and isn't aiming for an obstacle or out of bounds
+            target = self._find_free_cell(pos + (direction / distance) * reach)
+
+            # Look one sub-goal distance further along the line from the target towards the goal. A clear line means the target is not in a pocket, so it is used
+            ahead = self.goal - target
+            ahead_distance = np.linalg.norm(ahead)
+            if ahead_distance < 1e-9:
+                return target
+
+            probe = target + (ahead / ahead_distance) * min(ahead_distance, self.config.subgoal_dist)
+            if not self._segment_blocked(target, probe):
+                return target
+
+            # Blocked ahead, so aim further next time round
+            reach *= 2
+
+        # Every doubling was blocked ahead, so the furthest target is the best there is
+        return target
 
     def _escape(self, pos):
         """
@@ -170,11 +191,14 @@ class Hybrid(BasePlanner, APFMixin):
         subgoal = self._pick_subgoal(pos)
 
         # A fresh RRT* algorithm object is constructed for each escape since its tree is rooted atthe current position. The same rng is passed so the whole run stays reproducible from a single seed.
-        escape = RRTStar(self.grid, pos, subgoal, self.config, self.rng).plan()
+        escape = RRTStar(self.grid, pos, subgoal, self.config, self.rng, trace=self.trace).plan()
 
-        # Fallback: if the sub-goal was unreachable, try the real goal directly
+        # Fallback: if the sub-goal was unreachable, try the real goal directly. When tracing, the failed attempt's tree is kept in front of the fallback's so the animation shows both
         if not escape["success"]:
-            escape = RRTStar(self.grid, pos, self.goal, self.config, self.rng).plan()
+            attempt = escape
+            escape = RRTStar(self.grid, pos, self.goal, self.config, self.rng, trace=self.trace).plan()
+            if self.trace:
+                escape["trace"] = attempt["trace"] + escape["trace"]
 
         # return the escape path
         return escape
@@ -183,7 +207,7 @@ class Hybrid(BasePlanner, APFMixin):
         """
         Run the hybrid planner.
 
-        Returns a dictionary with the path of points, whether it succeeded, the number of iterations, number of times it switched to RRT* and the junction points where the mode switch happened.
+        Returns a dictionary with the path of points, the path before smoothing, whether it succeeded, the number of iterations, number of times it switched to RRT* and the indices into the unsmoothed path where the mode switch happened. When tracing it also carries one entry per escape with the junction index and the tree events of the RRT* runs made there.
         """
         # Build the per-obstacle distance and gradient stacks once, so that every APF step is only an array lookup. This function is provided by mixin
         dist_stack, gx_stack, gy_stack = self._precompute_fields()
@@ -204,6 +228,9 @@ class Hybrid(BasePlanner, APFMixin):
         # Counters for the number of switches and total number of iterations
         num_switches = 0
         total_iterations = 0
+
+        # One entry per escape when tracing: where in the driven route it happened and the tree events of the RRT* runs it made
+        escape_traces = []
         ### === END ===
 
         # Every hybrid iteration is one APF step, so the APF budget bounds the run
@@ -216,13 +243,18 @@ class Hybrid(BasePlanner, APFMixin):
                 # If APF has arrived at the goal threshold attempt smoothing, if no smoothing is done the path is left untouched
                 result_path = self.smoother.smooth(path, self.grid)
 
-                return {
+                # The route as driven goes back too. The junction indices point into it, not into the smoothed path, since smoothing swaps stretches of points for curves with a different count
+                result = {
                     "path": result_path,
+                    "raw_path": path,
                     "success": True,
                     "iters": total_iterations,
                     "switches": num_switches,
                     "junctions": junction_indices,
                 }
+                if self.trace:
+                    result["trace"] = escape_traces
+                return result
 
             ### === One APF step === ###
             # Work out the resultant force and its magnitude
@@ -244,8 +276,8 @@ class Hybrid(BasePlanner, APFMixin):
                 # The new position is current position + step direction multiplied by configured step distance
                 new_pos = pos + step_dir * self.config.apf_step
 
-                # If the step drives into an obstacle or out of bounds do not take it, consider APF blocked
-                if self._point_blocked(new_pos):
+                # If the step drives into an obstacle or out of bounds do not take it, consider APF blocked. The whole segment is checked so the step is judged the same way the scorer judges it
+                if self._segment_blocked(pos, new_pos):
                     blocked = True
                 else:
                     # Otherwise commit to the step
@@ -253,6 +285,10 @@ class Hybrid(BasePlanner, APFMixin):
                     # Append copies to the path and recent hysteresis window so the mutable reference isn't shared
                     path.append(pos.copy())
                     recent.append(pos.copy())
+
+            # A refused step leaves the vehicle where it was. That position still goes into the window, so a vehicle held against a wall shows no displacement and the stuck test below fires once the window fills, rather than on the first touch
+            if blocked:
+                recent.append(pos.copy())
 
             # If there is adaptive stuck-detection
             if self.adaptive:
@@ -269,11 +305,8 @@ class Hybrid(BasePlanner, APFMixin):
             # Flag for stuck detection
             stuck = False
 
-            # A hard block from moving into an obstacle or out of bounds or equilibrium resultant force is counted as stuck as there is no reason to wait
-            if blocked:
-                stuck = True
-            # Otherwise only judge the movement as stuck (no-progress) if the window is full of coordinates that don't seem to make progress
-            elif len(recent) >= window:
+            # Judge the movement as stuck (no-progress) only if the window is full of coordinates that don't seem to make progress. A refused step is not stuck on its own, one brush with a wall is not worth an RRT* run
+            if len(recent) >= window:
                 # Finds the euclidean (straight-line) distance from the point that is a "window" steps ago and the current point. If there is oscillation a lot of distance will be covered with little displacement
                 # moved is the displacement magnitude
                 moved = np.linalg.norm(recent[-1] - recent[-window])
@@ -301,6 +334,9 @@ class Hybrid(BasePlanner, APFMixin):
                 # Record the coordinate (current point) where the mode switch occurs
                 junction_indices.append(len(path) - 1)
 
+                if self.trace:
+                    escape_traces.append({"junction": len(path) - 1, "events": escape["trace"]})
+
                 # Append the escape path, skipping its first point since that is the current position already in the path
                 for point in escape["path"][1:]:
                     path.append(np.asarray(point, dtype=float))
@@ -314,10 +350,14 @@ class Hybrid(BasePlanner, APFMixin):
                 recent.append(pos.copy())
 
             # If the loop is exited it has failed to reach the goal within the configured number of iterations, since the success condition returns from within the loop
-        return {
+        result = {
             "path": path,
+            "raw_path": path,
             "success": False,
             "iters": total_iterations,
             "switches": num_switches,
             "junctions": junction_indices,
         }
+        if self.trace:
+            result["trace"] = escape_traces
+        return result
