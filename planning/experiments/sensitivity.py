@@ -29,14 +29,16 @@ from .runner import StaticStudy, build_algorithms, derived_seed
 PILOT_SEED = 7
 PILOT_INSTANCES = 20
 
-# The comparisons the run is sized for, (scenario, metric, baseline, other). They are the three confirmatory pairs on the measurements the claims rest on: whether the modified hybrid gets through where APF does not, and whether it is quicker and turns more gently than the standard hybrid and than RRT*
+# The comparisons the run is sized for, (scenario, metric, baseline, other). They are the three confirmatory pairs on the measurements the significance table tests, WILCOXON_METRICS in analyse.py plus success: whether the modified hybrid gets through where APF does not, and whether it is quicker and turns more gently than the standard hybrid and than RRT*.
+#
+# The pilot that sized the headline run was read on mission_time_curved, and the significance table tests the constant-speed mission_time. The two lists have to agree, and the direction matters: changing the test after the run would be choosing the metric after seeing the result, so the power list moved to the metric the test uses and the pilot was re-read on it, which re-analyses the pilot and cannot bend the headline. Both estimates are kept under results/ and the README says which was which
 POWER_COMPARISONS = (
     ("blocked_road", "success", "Modified", "APF"),
     ("normal_city", "success", "Modified", "APF"),
-    ("normal_city", "mission_time_curved", "Modified", "Hybrid"),
-    ("dense_city", "mission_time_curved", "Modified", "Hybrid"),
+    ("normal_city", "mission_time", "Modified", "Hybrid"),
+    ("dense_city", "mission_time", "Modified", "Hybrid"),
     ("normal_city", "max_curvature", "Modified", "Hybrid"),
-    ("normal_city", "mission_time_curved", "Modified", "RRT*"),
+    ("normal_city", "mission_time", "Modified", "RRT*"),
     ("normal_city", "max_curvature", "Modified", "RRT*"),
 )
 

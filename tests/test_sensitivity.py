@@ -103,9 +103,13 @@ class TestPilot(unittest.TestCase):
         self.assertEqual(pilot.n_instances, PILOT_INSTANCES)
         self.assertEqual(pilot.n_repeats, 1)
 
-    def test_the_power_comparisons_are_the_confirmatory_pairs(self):
-        for _, _, baseline, other in POWER_COMPARISONS:
+    def test_the_power_comparisons_are_the_confirmatory_pairs_on_the_tested_metrics(self):
+        from planning.experiments.analyse import TESTED_METRICS
+
+        # The run is sized for the tests it reports, so every power comparison is a confirmatory pair on a metric the significance table tests
+        for _, metric, baseline, other in POWER_COMPARISONS:
             self.assertIn((baseline, other), CONFIRMATORY)
+            self.assertIn(metric, TESTED_METRICS)
 
 
 class TestTuning(unittest.TestCase):
